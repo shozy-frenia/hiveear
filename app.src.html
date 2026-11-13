@@ -1,0 +1,688 @@
+<title>HiveEar</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: instrument-panel app. Sticky top bar, three hash views; Diagnose = input column + analysis column around a dark "scope" spectrogram. */
+:root {
+  --bg: #F2F3EC; --surface: #FFFFFF; --sunk: #E8EADF; --ink: #191C14; --muted: #5C6152; --line: #D8DBCC;
+  --accent: #E9A419; --accent-ink: #7A4E00; --accent-soft: #F7E6BE;
+  --ok: #2B7A4B; --ok-soft: #DDEFE3; --warn: #C2510C; --warn-soft: #FBE4D3; --crit: #B3243A; --crit-soft: #F7DCE0;
+  --scope: #0F110C; --scope-ink: #C9CCBC; --scope-line: #2A2E22;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10120D; --surface: #191C15; --sunk: #14170F; --ink: #ECEEE3; --muted: #9EA393; --line: #2D3126;
+  --accent: #F2B33D; --accent-ink: #F2B33D; --accent-soft: #3A2E12;
+  --ok: #55C985; --ok-soft: #173022; --warn: #FF8C42; --warn-soft: #3A2414; --crit: #FF6378; --crit-soft: #3A1820;
+  --scope: #0A0B08; --scope-ink: #B9BDAA; --scope-line: #262A1F; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #10120D; --surface: #191C15; --sunk: #14170F; --ink: #ECEEE3; --muted: #9EA393; --line: #2D3126;
+  --accent: #F2B33D; --accent-ink: #F2B33D; --accent-soft: #3A2E12;
+  --ok: #55C985; --ok-soft: #173022; --warn: #FF8C42; --warn-soft: #3A2414; --crit: #FF6378; --crit-soft: #3A1820;
+  --scope: #0A0B08; --scope-ink: #B9BDAA; --scope-line: #262A1F; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+.mono, .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.label { font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+button, .btn { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* top bar */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 20px; min-height: 60px; flex-wrap: wrap; padding-block: 8px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand b { font-family: var(--f-display); font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.brand small { font-family: var(--f-mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; }
+nav.tabs { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+nav.tabs a { text-decoration: none; color: var(--muted); padding: 7px 14px; border-radius: 8px; font-weight: 500; }
+nav.tabs a:hover { color: var(--ink); background: var(--sunk); }
+nav.tabs a[aria-current="page"] { color: var(--ink); background: var(--accent-soft); }
+
+main { padding-block: 28px 64px; }
+.view-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+.view-head h1 { font-size: clamp(26px, 3.4vw, 38px); font-weight: 800; }
+.view-head p { margin: 6px 0 0; color: var(--muted); max-width: 62ch; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0; }
+.panel > h2 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+.panel > .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+
+/* diagnose layout */
+.diag { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .diag { grid-template-columns: minmax(0, 1fr); } }
+.side { display: grid; gap: 16px; }
+.samples { display: grid; gap: 8px; }
+.sample { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; text-align: left; background: var(--sunk); border: 1px solid transparent; border-radius: 9px; padding: 10px; color: var(--ink); }
+.sample:hover { border-color: var(--line); }
+.sample[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.sample .ico { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); }
+.sample b { display: block; font-weight: 600; font-size: 14px; }
+.sample span { display: block; font-size: 12.5px; color: var(--muted); }
+.note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.drop { display: grid; place-items: center; text-align: center; gap: 4px; border: 1.5px dashed var(--line); border-radius: 9px; padding: 18px 12px; color: var(--muted); font-size: 13.5px; cursor: pointer; }
+.drop:hover, .drop.over { border-color: var(--accent); color: var(--ink); }
+.drop strong { color: var(--ink); font-weight: 600; }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.player { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.play { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--accent); color: #1A1300; display: grid; place-items: center; flex: none; }
+.player .meta { min-width: 0; }
+.player .meta b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player .meta span { font-size: 12.5px; color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+select, textarea, input[type="text"] { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+textarea { width: 100%; resize: vertical; min-height: 64px; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 600; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #1A1300; }
+.btn:disabled { opacity: .55; cursor: default; }
+.toast { font-size: 13px; color: var(--ok); min-height: 1.2em; margin-top: 8px; }
+
+/* results */
+.results { display: grid; gap: 16px; min-width: 0; }
+.verdict { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 99px; padding: 3px 10px; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.s-healthy { color: var(--ok); background: var(--ok-soft); }
+.s-queenless { color: var(--crit); background: var(--crit-soft); }
+.s-swarm { color: var(--warn); background: var(--warn-soft); }
+.verdict h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; margin: 10px 0 6px; }
+.verdict p { margin: 0; color: var(--muted); max-width: 60ch; }
+.gauge { width: 112px; text-align: center; }
+.gauge svg { display: block; width: 112px; height: 112px; }
+.gauge .label { margin-top: 2px; }
+.probs { display: grid; gap: 8px; margin-top: 16px; }
+.prob { display: grid; grid-template-columns: 150px minmax(0, 1fr) 48px; gap: 10px; align-items: center; font-size: 13.5px; }
+.prob .bar { height: 8px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
+.prob .bar i { display: block; height: 100%; border-radius: 99px; transition: width .5s ease; }
+.prob .num { text-align: right; font-size: 13px; }
+@media (max-width: 520px) { .verdict { grid-template-columns: 1fr; } .prob { grid-template-columns: 110px minmax(0,1fr) 44px; } }
+
+.scope { background: var(--scope); border-radius: var(--r); padding: 14px; color: var(--scope-ink); min-width: 0; }
+.scope .head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 8px; }
+.scope .head b { color: #F4F1E6; font-family: var(--f-display); font-size: 15px; font-weight: 700; }
+.scope canvas { display: block; width: 100%; height: 250px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+#spectrum { width: 100%; height: auto; display: block; }
+.ind { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ind td { padding: 9px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.ind tr:first-child td { border-top: 0; }
+.ind .v { text-align: right; white-space: nowrap; font-family: var(--f-mono); }
+.ind .rng { color: var(--muted); font-size: 12px; }
+.flag { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+
+.actions ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.ai-out { white-space: pre-wrap; background: var(--sunk); border-radius: 8px; padding: 12px 14px; margin-top: 12px; font-size: 14px; }
+.ai-out:empty { display: none; }
+.warnbox { background: var(--warn-soft); color: var(--ink); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; margin-top: 12px; }
+
+/* apiary */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+@media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; }
+.kpi .num { font-size: 28px; font-weight: 500; display: block; margin-top: 4px; }
+.example-tag { font-family: var(--f-mono); font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 6px; padding: 2px 8px; }
+.hives { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.hive { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 10px; }
+.hive .t { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+.hive h3 { font-size: 17px; font-weight: 700; }
+.hive .loc { font-size: 12.5px; color: var(--muted); }
+.hive svg { width: 100%; height: 46px; display: block; }
+.hive .foot { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); gap: 8px; }
+.hive .next { font-size: 13.5px; }
+.feed { display: grid; gap: 0; }
+.feed div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.feed div:first-child { border-top: 0; }
+.feed time { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.apiary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); gap: 18px; align-items: start; }
+@media (max-width: 960px) { .apiary-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* how */
+.how { display: grid; gap: 18px; }
+.pipeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .pipeline { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 480px) { .pipeline { grid-template-columns: minmax(0, 1fr); } }
+.step .n { font-family: var(--f-mono); color: var(--accent-ink); font-size: 13px; }
+.step h3 { font-size: 16px; margin: 4px 0 6px; }
+.step p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.tbl-wrap { overflow-x: auto; }
+table.sig { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+table.sig th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 8px; border-bottom: 1px solid var(--line); }
+table.sig td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.cols3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .cols3 { grid-template-columns: minmax(0, 1fr); } }
+.price { font-family: var(--f-display); font-size: 26px; font-weight: 800; }
+.how p, .how li { max-width: 70ch; }
+.loading { color: var(--muted); padding: 40px 0; text-align: center; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#diagnose" aria-label="HiveEar home">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path d="M15 2 26.3 8.5v13L15 28 3.7 21.5v-13Z" fill="var(--accent)"/><path d="M8 15h2.2l1.6-4.5 2.6 9 2.4-7 1.6 2.5H22" fill="none" stroke="#1A1300" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>HiveEar</b><small>MVP 0.3</small>
+    </a>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#diagnose" data-view="diagnose">Diagnose</a>
+      <a href="#apiary" data-view="apiary">Apiary</a>
+      <a href="#how" data-view="how">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- DIAGNOSE -->
+  <section id="v-diagnose" data-v="diagnose">
+    <div class="view-head">
+      <div>
+        <h1>Hear what's wrong before you open the hive</h1>
+        <p>Give HiveEar 30 seconds of hive sound. It reads the colony's hum and tells you whether the colony is calm and queenright, has lost its queen, or is getting ready to swarm.</p>
+      </div>
+    </div>
+    <div class="diag">
+      <div class="side">
+        <div class="panel">
+          <h2>Listen to a hive</h2>
+          <p class="sub">Pick a demo recording or upload your own.</p>
+          <div class="samples" id="samples"></div>
+          <p class="note">The demo recordings are synthesized from published hive acoustics, so the demo works without a live hive.</p>
+        </div>
+        <div class="panel">
+          <h2>Your recording</h2>
+          <p class="sub">Hold the phone flat against the hive wall, near the brood, for 30 seconds. Evening recordings work best.</p>
+          <label class="drop" id="drop" for="file">
+            <input type="file" id="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+            <span><strong>Upload audio</strong> or drop a file here</span>
+            <span>.wav .mp3 .m4a .ogg</span>
+          </label>
+          <div class="player">
+            <button class="play" id="play" aria-label="Play recording"><svg id="playIco" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg></button>
+            <div class="meta"><b id="curName">–</b><span id="curMeta">–</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Save this check</h2>
+          <p class="sub">Add the result to a hive's history in your apiary.</p>
+          <div class="row">
+            <select id="saveHive" aria-label="Hive"></select>
+            <button class="btn primary" id="saveBtn">Save to hive</button>
+          </div>
+          <div class="toast" id="saveToast" role="status"></div>
+        </div>
+      </div>
+
+      <div class="results" id="results" aria-live="polite">
+        <div class="panel loading" id="loading">Listening to the hive…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- APIARY -->
+  <section id="v-apiary" data-v="apiary" hidden>
+    <div class="view-head">
+      <div>
+        <h1>Apiary</h1>
+        <p>Every hive's health score over time, so you open the hives that need you and leave the rest alone.</p>
+      </div>
+      <span class="example-tag">Example apiary · your saved checks are added on top</span>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="apiary-grid">
+      <div class="hives" id="hives"></div>
+      <div class="panel">
+        <h2>Alerts</h2>
+        <p class="sub">Newest first</p>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section id="v-how" data-v="how" hidden>
+    <div class="view-head">
+      <div>
+        <h1>How HiveEar listens</h1>
+        <p>A colony's sound changes before its behaviour does. Beekeepers with decades of experience can hear a queenless hive. HiveEar measures the same signals so that any beekeeper can.</p>
+      </div>
+    </div>
+    <div class="how">
+      <div class="pipeline">
+        <div class="panel step"><span class="n">Step 1</span><h3>Record</h3><p>A phone held to the hive wall for 30 s, or a $15 sensor inside the hive that records every hour.</p></div>
+        <div class="panel step"><span class="n">Step 2</span><h3>Spectrum</h3><p>Short-time Fourier transform: 2048-point frames, 0–2 kHz, about 4 Hz resolution. The steady hum is separated from short bursts.</p></div>
+        <div class="panel step"><span class="n">Step 3</span><h3>Five signals</h3><p>Hum pitch, spectral flatness, high/low band ratio, loudness swings and queen-piping events per minute.</p></div>
+        <div class="panel step"><span class="n">Step 4</span><h3>Verdict and plan</h3><p>Probabilities for three colony states, a 0–100 health score, and what to do in the next 48 hours.</p></div>
+      </div>
+      <div class="panel">
+        <h2>Signals HiveEar reads</h2>
+        <p class="sub">Frequency ranges come from published bee acoustics research.</p>
+        <div class="tbl-wrap">
+          <table class="sig">
+            <thead><tr><th>Colony state</th><th>What it sounds like</th><th>Measured as</th><th>Why it matters</th></tr></thead>
+            <tbody>
+              <tr><td><span class="chip s-healthy">Queenright</span></td><td>Steady hum, fundamental 200–280 Hz, clean harmonics</td><td>Low flatness, low band ratio</td><td>Baseline. Check again in a week.</td></tr>
+              <tr><td><span class="chip s-queenless">Queenless</span></td><td>Raised, rough "roar" with uneven loudness</td><td>Hum pitch above 280 Hz, flatness above 0.3, band ratio above 1</td><td>Without a queen the colony dies within weeks. A new queen must arrive in time.</td></tr>
+              <tr><td><span class="chip s-swarm">Pre-swarm</span></td><td>Queen "tooting" at 400–500 Hz, answered by "quacking" at 300–350 Hz</td><td>Narrow tonal bursts per minute</td><td>Half the bees leave with the old queen, and the season's honey goes with them.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="cols3">
+        <div class="panel"><h2>Where the model is today</h2><p class="sub">MVP 0.3</p><p>An explainable rule model on five acoustic features with thresholds taken from the research literature. Every verdict shows the numbers behind it. It runs fully in the browser, so no audio leaves the phone.</p></div>
+        <div class="panel"><h2>Next 6 months</h2><p class="sub">Roadmap</p><p>Train a CNN on open labelled hive-audio datasets plus our own field recordings from partner apiaries near Almaty. Add a Varroa-stress signal. Release Android and iOS apps with offline mode for apiaries without signal.</p></div>
+        <div class="panel"><h2>HiveEar Sensor</h2><p class="sub">Hardware, 2027</p><p>ESP32 board, MEMS microphone, temperature and humidity sensors, LoRa or GSM link. Bill of materials about $15. It listens every hour and sends a push alert when something changes.</p></div>
+      </div>
+      <div class="cols3">
+        <div class="panel"><span class="label">Hobby</span><div class="price">Free</div><p>Up to 2 hives, phone checks, full verdicts.</p></div>
+        <div class="panel"><span class="label">Apiary</span><div class="price">$4.99<span class="label"> / month</span></div><p>Unlimited hives, history, alerts, AI beekeeper advice.</p></div>
+        <div class="panel"><span class="label">Pro and pollination</span><div class="price">$2<span class="label"> / hive / month</span></div><p>Sensor fleets, team access, reports for orchards and crop growers that rent hives.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/*__ENGINE__*/
+</script>
+<script>
+(() => {
+  'use strict';
+  const E = window.HiveEngine;
+  const $ = (s) => document.querySelector(s);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+
+  const STATES = {
+    healthy:   { name: 'Queenright, calm', chip: 'Healthy', title: 'Colony sounds healthy and queenright',
+                 text: 'Steady worker hum with clean harmonics. No queen piping heard.',
+                 actions: ['No inspection needed now. Record again in 7 days at the same time of day so the trend stays comparable.',
+                           'At your next routine inspection, confirm fresh eggs and a solid brood pattern.',
+                           'In swarm season (May–June), record every 3–4 days. Piping usually starts a few days before a swarm leaves.'] },
+    queenless: { name: 'Queenless suspected', chip: 'Queenless', title: 'Queen loss suspected',
+                 text: 'The hum is higher, rougher and more uneven than a queenright colony. Colonies make this "queenless roar" within hours of losing the queen.',
+                 actions: ['Inspect within 24–48 hours. Look for eggs and larvae younger than 3 days.',
+                           'If there are no eggs, introduce a mated queen, or give a frame with eggs from a strong colony so the bees can raise a new one.',
+                           'Check for laying workers: several eggs in one cell, or eggs on the cell walls. These need a different fix.',
+                           'Record again 3 days after the fix. The hum should settle back towards 250 Hz.'] },
+    swarm:     { name: 'Swarm preparation', chip: 'Pre-swarm', title: 'Queen piping: swarm likely within days',
+                 text: 'HiveEar heard repeated 400–500 Hz "tooting" from the queen and answering "quacks". This usually means queen cells are capped and a swarm is close.',
+                 actions: ['Inspect today. Look for capped queen cells along the bottom bars and frame edges.',
+                           'Make an artificial swarm or a split: move the old queen with some brood into a new box.',
+                           'Give the colony room. Add a super or empty drawn comb to reduce congestion.',
+                           'Put a bait hive within 50 m to catch the swarm if it still leaves.'] }
+  };
+  const COLOR = { healthy: 'var(--ok)', queenless: 'var(--crit)', swarm: 'var(--warn)' };
+
+  const SAMPLES = [
+    { id: 'healthy',   seed: 11, name: 'Strong colony, May',       desc: 'Queenright, 10 frames of bees', file: 'hive-07_may-14_evening.wav' },
+    { id: 'queenless', seed: 23, name: 'Colony after queen loss',   desc: 'Queen died during inspection', file: 'hive-03_jun-02_evening.wav' },
+    { id: 'swarm',     seed: 37, name: 'Colony before swarming',    desc: 'Capped queen cells found later', file: 'hive-11_may-28_noon.wav' }
+  ];
+
+  // ---------- apiary data (example) ----------
+  const EXAMPLE_HIVES = [
+    { id: 'h1', name: 'Hive 1', loc: 'Talgar, row A', hist: [91, 93, 90, 94, 92, 95, 93, 94] },
+    { id: 'h2', name: 'Hive 2', loc: 'Talgar, row A', hist: [88, 90, 86, 89, 72, 41, 18, 9], state: 'queenless' },
+    { id: 'h3', name: 'Hive 3', loc: 'Talgar, row A', hist: [92, 91, 93, 90, 92, 91, 94, 92] },
+    { id: 'h4', name: 'Hive 4', loc: 'Talgar, row B', hist: [94, 92, 90, 85, 70, 52, 30, 14], state: 'swarm' },
+    { id: 'h5', name: 'Hive 5', loc: 'Talgar, row B', hist: [83, 86, 85, 88, 87, 90, 89, 91] },
+    { id: 'h6', name: 'Hive 6', loc: 'Esik, orchard', hist: [90, 89, 92, 90, 88, 91, 90, 93] }
+  ];
+  const EXAMPLE_FEED = [
+    { t: 'Today 19:42', hive: 'Hive 4', state: 'swarm', msg: 'Queen piping, 9 events per minute. Inspect today for queen cells.' },
+    { t: 'Today 19:40', hive: 'Hive 2', state: 'queenless', msg: 'Hum rose to 318 Hz and turned rough. Queen loss suspected.' },
+    { t: 'Yesterday', hive: 'Hive 4', state: 'swarm', msg: 'First piping detected, 2 events per minute.' },
+    { t: '3 days ago', hive: 'Hive 2', state: 'healthy', msg: 'Health score dropped from 89 to 72 after inspection.' },
+    { t: '5 days ago', hive: 'Hive 5', state: 'healthy', msg: 'Recovered after feeding. Score 90.' }
+  ];
+
+  let current = null;   // { name, meta, data, sr }
+  let result = null;
+  let audio = { ctx: null, src: null };
+
+  // ---------- routing ----------
+  const VIEWS = ['diagnose', 'apiary', 'how'];
+  function route() {
+    const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'diagnose';
+    document.querySelectorAll('[data-v]').forEach((s) => { s.hidden = s.dataset.v !== v; });
+    document.querySelectorAll('nav.tabs a').forEach((a) => { if (a.dataset.view === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    if (v === 'apiary') renderApiary();
+    if (v === 'diagnose' && result) requestAnimationFrame(drawSpectrogram);
+  }
+  window.addEventListener('hashchange', route);
+
+  // ---------- samples ----------
+  const icoWave = (c) => `<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M1 9h2.5l1.5-4 3 9 2.5-7 1.5 3H17" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  function renderSamples(active) {
+    $('#samples').innerHTML = SAMPLES.map((s) => `
+      <button class="sample" data-id="${s.id}" aria-pressed="${s.id === active}">
+        <span class="ico">${icoWave(COLOR[s.id])}</span>
+        <span><b>${s.name}</b><span>${s.desc}</span></span>
+      </button>`).join('');
+    $('#samples').querySelectorAll('.sample').forEach((b) => b.addEventListener('click', () => loadSample(b.dataset.id)));
+  }
+  function loadSample(id) {
+    const s = SAMPLES.find((x) => x.id === id);
+    stopAudio();
+    renderSamples(id);
+    showLoading();
+    setTimeout(() => {
+      const syn = E.synthesize(s.id, s.seed, 10);
+      current = { name: s.file, meta: `Demo · ${s.name} · 10 s`, data: syn.data, sr: syn.sampleRate, label: s.name };
+      runAnalysis();
+    }, 30);
+  }
+
+  // ---------- upload ----------
+  async function loadFile(file) {
+    if (!file) return;
+    stopAudio();
+    renderSamples(null);
+    showLoading('Decoding ' + file.name + '…');
+    try {
+      const buf = await file.arrayBuffer();
+      const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const ac = new Ctx(1, 1, 44100);
+      const ab = await ac.decodeAudioData(buf);
+      const n = ab.length, mono = new Float32Array(n);
+      for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) mono[i] += d[i] / ab.numberOfChannels; }
+      current = { name: file.name, meta: `Your upload · ${ab.duration.toFixed(1)} s · ${Math.round(ab.sampleRate / 1000)} kHz`, data: mono, sr: ab.sampleRate, label: file.name };
+      runAnalysis();
+    } catch (e) {
+      showError(`HiveEar couldn't read "${file.name}". Try a .wav or .mp3 file, or export the voice memo as .m4a.`);
+    }
+  }
+  const fileIn = $('#file'), drop = $('#drop');
+  fileIn.addEventListener('change', () => loadFile(fileIn.files[0]));
+  ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => loadFile(e.dataTransfer.files[0]));
+
+  // ---------- playback ----------
+  const ICON_PLAY = '<path d="M4 2.5v11l9-5.5z" fill="currentColor"/>', ICON_STOP = '<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/>';
+  function stopAudio() { if (audio.src) { try { audio.src.stop(); } catch {} audio.src = null; } $('#playIco').innerHTML = ICON_PLAY; $('#play').setAttribute('aria-label', 'Play recording'); }
+  $('#play').addEventListener('click', () => {
+    if (audio.src) return stopAudio();
+    if (!current) return;
+    try {
+      audio.ctx = audio.ctx || new (window.AudioContext || window.webkitAudioContext)();
+      const b = audio.ctx.createBuffer(1, current.data.length, current.sr);
+      b.copyToChannel(current.data, 0);
+      const src = audio.ctx.createBufferSource(); src.buffer = b; src.connect(audio.ctx.destination);
+      src.onended = () => { if (audio.src === src) stopAudio(); };
+      src.start(); audio.src = src;
+      $('#playIco').innerHTML = ICON_STOP; $('#play').setAttribute('aria-label', 'Stop playback');
+    } catch { /* audio unavailable: analysis still works */ }
+  });
+
+  // ---------- analysis + render ----------
+  function showLoading(msg) { $('#results').innerHTML = `<div class="panel loading">${msg ? esc(msg) : 'Listening to the hive…'}</div>`; }
+  function showError(msg) { $('#results').innerHTML = `<div class="panel"><h2>Recording not analysed</h2><p class="sub">${esc(msg)}</p></div>`; }
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function runAnalysis() {
+    $('#curName').textContent = current.name; $('#curMeta').textContent = current.meta;
+    const r = E.analyze(current.data, current.sr);
+    if (r.error) return showError(r.error);
+    result = r; renderResult();
+  }
+
+  function gaugeSvg(score, state) {
+    const R = 46, C = 2 * Math.PI * R, off = C * (1 - score / 100);
+    return `<svg viewBox="0 0 112 112" role="img" aria-label="Health score ${score} out of 100">
+      <circle cx="56" cy="56" r="${R}" fill="none" stroke="var(--sunk)" stroke-width="10"/>
+      <circle cx="56" cy="56" r="${R}" fill="none" stroke="${COLOR[state]}" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 56 56)"/>
+      <text x="56" y="62" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="26" font-weight="500" fill="var(--ink)">${score}</text>
+    </svg><div class="label">Health score</div>`;
+  }
+
+  function indicatorRows(f) {
+    const rows = [
+      { k: 'Hum pitch', v: `${f.f0.toFixed(0)} Hz`, rng: 'Queenright 200–280 Hz', bad: f.f0 > 285 },
+      { k: 'Spectral flatness', v: f.flatness.toFixed(2), rng: 'Clean hum < 0.30. Rough roar > 0.30', bad: f.flatness > 0.3 },
+      { k: 'High / low band ratio', v: f.bandRatio.toFixed(2), rng: '300–600 Hz vs 150–300 Hz energy. Normal < 1.0', bad: f.bandRatio > 1 },
+      { k: 'Loudness swings', v: `${Math.round(f.cv * 100)}%`, rng: 'Variation over 0.5 s blocks. Calm < 20%', bad: f.cv > 0.2 },
+      { k: 'Queen piping', v: `${f.pipingPerMin.toFixed(1)}/min`, rng: '400–500 Hz toots and 300–350 Hz quacks. Normal: none', bad: f.pipingPerMin >= 3 }
+    ];
+    return rows.map((r) => `<tr><td><span class="flag" style="background:${r.bad ? 'var(--warn)' : 'var(--ok)'}"></span>${r.k}<div class="rng">${r.rng}</div></td><td class="v">${r.v}</td></tr>`).join('');
+  }
+
+  function renderResult() {
+    const r = result, st = STATES[r.verdict], f = r.features;
+    const order = ['healthy', 'queenless', 'swarm'];
+    const qualityNote = r.quality === 'too_quiet'
+      ? `<div class="warnbox">This recording is very quiet (${r.dbfs.toFixed(0)} dBFS). Press the phone against the hive wall and record again for a reliable verdict.</div>`
+      : r.quality === 'short' ? `<div class="warnbox">Only ${r.seconds.toFixed(1)} s of audio. 30 s gives a steadier verdict.</div>` : '';
+    $('#results').innerHTML = `
+      <div class="panel">
+        <div class="verdict">
+          <div>
+            <span class="chip s-${r.verdict}">${st.chip}</span>
+            <h2>${st.title}</h2>
+            <p>${st.text}</p>
+          </div>
+          <div class="gauge">${gaugeSvg(r.healthScore, r.verdict)}</div>
+        </div>
+        <div class="probs">
+          ${order.map((k) => `<div class="prob"><span>${STATES[k].name}</span><span class="bar"><i style="width:${(r.probs[k] * 100).toFixed(1)}%;background:${COLOR[k]}"></i></span><span class="num">${Math.round(r.probs[k] * 100)}%</span></div>`).join('')}
+        </div>
+        ${qualityNote}
+      </div>
+      <div class="scope">
+        <div class="head"><b>Spectrogram</b><span class="mono">${current.name} · ${r.seconds.toFixed(1)} s · 0–1000 Hz</span></div>
+        <canvas id="spec" aria-label="Spectrogram of the hive recording"></canvas>
+        <div class="legend"><span><i style="background:#F2B33D"></i>Piping event (${r.events.length})</span><span><i style="background:rgba(85,201,133,.55)"></i>Worker hum band 200–280 Hz</span></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h2>Average spectrum</h2>
+          <p class="sub">Where the colony's sound energy sits</p>
+          ${spectrumSvg(r)}
+        </div>
+        <div class="panel">
+          <h2>What HiveEar measured</h2>
+          <p class="sub">The five signals behind this verdict</p>
+          <table class="ind">${indicatorRows(f)}</table>
+        </div>
+      </div>
+      <div class="panel actions">
+        <h2>What to do in the next 48 hours</h2>
+        <ol>${st.actions.map((a) => `<li>${a}</li>`).join('')}</ol>
+        <div id="aiBox" hidden>
+          <p class="label" style="margin:18px 0 6px">AI beekeeper</p>
+          <label for="aiNote" class="sub" style="display:block;font-size:13.5px;color:var(--muted);margin-bottom:6px">Anything you noticed at the hive? The AI uses it with the measurements.</label>
+          <textarea id="aiNote" placeholder="For example: lots of drones, bees hanging at the entrance, last saw eggs 9 days ago"></textarea>
+          <div class="row" style="margin-top:8px"><button class="btn primary" id="aiBtn">Get a plan for this hive</button><button class="btn" id="aiStop" hidden>Stop</button></div>
+          <div class="ai-out" id="aiOut"></div>
+        </div>
+      </div>`;
+    requestAnimationFrame(drawSpectrogram);
+    setupAI();
+  }
+
+  function spectrumSvg(r) {
+    const W = 520, H = 210, L = 40, Rm = 10, Tm = 10, B = 30;
+    const db = r.spectrum.db, binHz = r.spectrum.binHz, maxF = 1000;
+    const k1 = Math.min(db.length - 1, Math.floor(maxF / binHz));
+    const lo = Math.max(...db.slice(Math.floor(80 / binHz), k1)) - 60, hi = lo + 60;
+    const x = (f) => L + (f / maxF) * (W - L - Rm), y = (v) => Tm + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - Tm - B);
+    let d = '';
+    for (let k = Math.ceil(40 / binHz); k <= k1; k++) d += (d ? 'L' : 'M') + x(k * binHz).toFixed(1) + ' ' + y(db[k]).toFixed(1);
+    const area = d + `L${x(k1 * binHz).toFixed(1)} ${H - B}L${x(Math.ceil(40 / binHz) * binHz).toFixed(1)} ${H - B}Z`;
+    const band = (a, b, c, t) => `<rect x="${x(a)}" y="${Tm}" width="${x(b) - x(a)}" height="${H - Tm - B}" fill="${c}" opacity=".14"/><text x="${(x(a) + x(b)) / 2}" y="${H - B - 6}" text-anchor="middle" font-size="10" fill="var(--muted)">${t}</text>`;
+    let ticks = '';
+    for (let f = 0; f <= 1000; f += 200) ticks += `<line x1="${x(f)}" x2="${x(f)}" y1="${Tm}" y2="${H - B}" stroke="var(--line)"/><text x="${x(f)}" y="${H - B + 16}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="JetBrains Mono, monospace">${f}</text>`;
+    for (let v = 0; v <= 60; v += 20) ticks += `<text x="${L - 6}" y="${y(hi - v) + 3}" text-anchor="end" font-size="10.5" fill="var(--muted)" font-family="JetBrains Mono, monospace">${-v}</text>`;
+    const f0 = r.features.f0;
+    return `<svg id="spectrum" viewBox="0 0 ${W} ${H}" role="img" aria-label="Average spectrum, peak at ${f0.toFixed(0)} Hz">
+      ${ticks}
+      ${band(200, 280, 'var(--ok)', 'hum')}${band(300, 350, 'var(--warn)', 'quack')}${band(400, 500, 'var(--warn)', 'toot')}
+      <path d="${area}" fill="var(--accent)" opacity=".18"/>
+      <path d="${d}" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linejoin="round"/>
+      <circle cx="${x(f0)}" cy="${y(db[Math.round(f0 / binHz)])}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>
+      <text x="${Math.min(x(f0) + 8, W - 70)}" y="${y(db[Math.round(f0 / binHz)]) + 4}" font-size="11" fill="var(--ink)" font-family="JetBrains Mono, monospace">${f0.toFixed(0)} Hz</text>
+      <text x="${W - Rm}" y="${H - 2}" text-anchor="end" font-size="10" fill="var(--muted)">Hz</text>
+      <text x="${4}" y="${Tm + 4}" font-size="10" fill="var(--muted)">dB</text>
+    </svg>`;
+  }
+
+  // spectrogram colormap: near-black → deep olive → amber → pale wax
+  const STOPS = [[10, 11, 8], [40, 48, 22], [120, 92, 18], [226, 152, 30], [250, 214, 120], [255, 248, 225]];
+  function cmap(t) { t = Math.max(0, Math.min(1, t)) * (STOPS.length - 1); const i = Math.min(STOPS.length - 2, Math.floor(t)), u = t - i; return STOPS[i].map((c, j) => c + (STOPS[i + 1][j] - c) * u); }
+  function drawSpectrogram() {
+    const cv = document.getElementById('spec'); if (!cv || !result) return;
+    const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    if (!w) return;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const rows = result.spectrogram.rows, nT = rows.length, nK = rows[0].length, binHz = result.spectrogram.binHz;
+    let mx = -Infinity; for (const r of rows) for (let k = Math.floor(60 / binHz); k < nK; k++) if (r[k] > mx) mx = r[k];
+    const off = document.createElement('canvas'); off.width = nT; off.height = nK;
+    const og = off.getContext('2d'), img = og.createImageData(nT, nK);
+    for (let t = 0; t < nT; t++) for (let k = 0; k < nK; k++) {
+      const c = cmap((rows[t][k] - (mx - 55)) / 55), p = ((nK - 1 - k) * nT + t) * 4;
+      img.data[p] = c[0]; img.data[p + 1] = c[1]; img.data[p + 2] = c[2]; img.data[p + 3] = 255;
+    }
+    og.putImageData(img, 0, 0);
+    const L = 58, B = 22, T = 8, R = 6, pw = w - L - R, ph = h - B - T;
+    g.clearRect(0, 0, w, h);
+    g.imageSmoothingEnabled = true; g.drawImage(off, L, T, pw, ph);
+    const css = getComputedStyle(document.documentElement);
+    g.fillStyle = css.getPropertyValue('--scope-ink').trim() || '#bbb'; g.font = '10.5px JetBrains Mono, monospace';
+    const maxF = nK * binHz;
+    g.textAlign = 'right';
+    for (let f = 0; f <= 1000; f += 250) { const yy = T + ph * (1 - f / maxF); if (yy >= T - 1 && yy <= T + ph + 1) g.fillText(f + ' Hz', L - 6, Math.min(T + ph, Math.max(T + 8, yy + 3))); }
+    g.textAlign = 'center';
+    const dur = result.seconds, stepS = dur > 20 ? 5 : dur > 8 ? 2 : 1;
+    for (let s = 0; s <= dur + 1e-6; s += stepS) g.fillText(s + ' s', Math.min(w - 14, Math.max(L + 8, L + pw * s / dur)), h - 6);
+    // hum band guide
+    g.fillStyle = 'rgba(85,201,133,.55)';
+    g.fillRect(L - 4, T + ph * (1 - 280 / maxF), 3, ph * (80 / maxF));
+    // piping markers
+    g.fillStyle = '#F2B33D';
+    for (const e of result.events) {
+      const xx = L + pw * (e.start + e.dur / 2) / dur, yy = T + ph * (1 - e.freq / maxF);
+      g.beginPath(); g.moveTo(xx, yy - 9); g.lineTo(xx - 5, yy - 17); g.lineTo(xx + 5, yy - 17); g.closePath(); g.fill();
+    }
+  }
+  let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawSpectrogram, 120); });
+
+  // ---------- AI beekeeper (sample capability, optional) ----------
+  let sampleFn = null, aiCtl = null;
+  if (window.claude && window.claude.use) {
+    window.claude.use('sample').then((s) => { sampleFn = s; setupAI(); }).catch(() => {});
+  }
+  function setupAI() {
+    const box = document.getElementById('aiBox'); if (!box || !sampleFn) return;
+    box.hidden = false;
+    const btn = $('#aiBtn'), stop = $('#aiStop'), out = $('#aiOut');
+    btn.onclick = async () => {
+      const r = result, f = r.features;
+      const prompt = `You are an experienced beekeeper and bee-acoustics specialist advising a beekeeper through the HiveEar app.
+HiveEar analysed ${r.seconds.toFixed(0)} s of hive audio:
+- Verdict: ${STATES[r.verdict].name} (queenright ${Math.round(r.probs.healthy * 100)}%, queenless ${Math.round(r.probs.queenless * 100)}%, pre-swarm ${Math.round(r.probs.swarm * 100)}%)
+- Health score: ${r.healthScore}/100
+- Hum pitch ${f.f0.toFixed(0)} Hz (queenright 200-280), spectral flatness ${f.flatness.toFixed(2)}, high/low band ratio ${f.bandRatio.toFixed(2)}, loudness swings ${Math.round(f.cv * 100)}%, queen piping ${f.pipingPerMin.toFixed(1)} events/min
+Beekeeper's notes: ${($('#aiNote').value || 'none').slice(0, 600)}
+
+Write a short, practical plan in plain text (no markdown symbols): one sentence on what is most likely happening, then 4-5 numbered steps with timing, then one line on what would change your mind. Keep it under 170 words. Be concrete about what to look for in the frames.`;
+      btn.disabled = true; stop.hidden = false; out.textContent = 'Thinking…';
+      aiCtl = new AbortController();
+      try {
+        const { text } = await sampleFn(prompt, { signal: aiCtl.signal, onText: ({ text }) => { out.textContent = text; } });
+        out.textContent = text;
+      } catch (e) {
+        const msg = { not_granted: 'AI advice is turned off for this page. The steps above still apply.', rate_limited: 'Too many requests right now. Try again in a minute.', aborted: '' }[e && e.code];
+        out.textContent = (e && e.text) ? e.text : (msg !== undefined ? msg : 'The AI beekeeper could not answer this time. The steps above still apply.');
+        if (e && e.code === 'not_granted') box.hidden = true;
+      } finally { btn.disabled = false; stop.hidden = true; }
+    };
+    stop.onclick = () => aiCtl && aiCtl.abort();
+  }
+
+  // ---------- saving + apiary ----------
+  function hivesWithChecks() {
+    const checks = store.get('hiveear.checks', []);
+    return EXAMPLE_HIVES.map((h) => {
+      const mine = checks.filter((c) => c.hive === h.id);
+      const hist = h.hist.concat(mine.map((c) => c.score));
+      const last = mine.length ? mine[mine.length - 1] : null;
+      return { ...h, hist, state: last ? last.state : (h.state || 'healthy'), lastCheck: last ? new Date(last.at) : null, mine: mine.length };
+    });
+  }
+  function fillSaveSelect() { $('#saveHive').innerHTML = EXAMPLE_HIVES.map((h) => `<option value="${h.id}">${h.name} · ${h.loc}</option>`).join(''); }
+  $('#saveBtn').addEventListener('click', () => {
+    if (!result) return;
+    const id = $('#saveHive').value, checks = store.get('hiveear.checks', []);
+    checks.push({ hive: id, at: Date.now(), state: result.verdict, score: result.healthScore, f0: Math.round(result.features.f0), src: current.label });
+    store.set('hiveear.checks', checks.slice(-200));
+    const h = EXAMPLE_HIVES.find((x) => x.id === id);
+    $('#saveToast').textContent = `Saved to ${h.name}. Health score ${result.healthScore}.`;
+    setTimeout(() => { $('#saveToast').textContent = ''; }, 4000);
+  });
+
+  function spark(hist, state) {
+    const W = 240, H = 46, n = hist.length, x = (i) => 2 + i * (W - 8) / (n - 1), y = (v) => 4 + (1 - v / 100) * (H - 8);
+    const d = hist.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Health score trend, latest ${hist[n - 1]}">
+      <line x1="0" x2="${W}" y1="${y(50)}" y2="${y(50)}" stroke="var(--line)" stroke-dasharray="3 3"/>
+      <path d="${d}L${x(n - 1)} ${H}L${x(0)} ${H}Z" fill="${COLOR[state]}" opacity=".12"/>
+      <path d="${d}" fill="none" stroke="${COLOR[state]}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      <circle cx="${x(n - 1)}" cy="${y(hist[n - 1])}" r="3.5" fill="${COLOR[state]}"/>
+    </svg>`;
+  }
+  const NEXT = { healthy: 'Next check in 7 days', queenless: 'Inspect within 48 h for eggs', swarm: 'Inspect today for queen cells' };
+  function renderApiary() {
+    const hives = hivesWithChecks();
+    const attention = hives.filter((h) => h.state !== 'healthy');
+    const avg = Math.round(hives.reduce((a, h) => a + h.hist[h.hist.length - 1], 0) / hives.length);
+    const nChecks = store.get('hiveear.checks', []).length;
+    $('#kpis').innerHTML = [
+      ['Hives', hives.length, 'Talgar and Esik'],
+      ['Need attention', attention.length, attention.map((h) => h.name).join(', ') || 'None'],
+      ['Average health', avg, 'out of 100'],
+      ['Your saved checks', nChecks, nChecks ? 'Added to the hive histories' : 'Save one from Diagnose']
+    ].map(([k, v, s]) => `<div class="kpi"><span class="label">${k}</span><span class="num">${v}</span><span class="note" style="margin:0">${esc(s)}</span></div>`).join('');
+    const order = { swarm: 0, queenless: 1, healthy: 2 };
+    $('#hives').innerHTML = hives.slice().sort((a, b) => order[a.state] - order[b.state]).map((h) => `
+      <article class="hive">
+        <div class="t"><div><h3>${h.name}</h3><div class="loc">${h.loc}</div></div><span class="chip s-${h.state}">${STATES[h.state].chip}</span></div>
+        ${spark(h.hist, h.state)}
+        <div class="foot"><span>Last ${h.hist.length} checks</span><span class="num" style="color:var(--ink)">${h.hist[h.hist.length - 1]}/100</span></div>
+        <div class="next">${NEXT[h.state]}</div>
+        ${h.mine ? `<div class="note" style="margin:0">${h.mine} saved check${h.mine > 1 ? 's' : ''} from you</div>` : ''}
+      </article>`).join('');
+    const mine = store.get('hiveear.checks', []).slice(-5).reverse().map((c) => ({
+      t: new Date(c.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      hive: (EXAMPLE_HIVES.find((h) => h.id === c.hive) || {}).name || 'Hive', state: c.state,
+      msg: `Your check: ${STATES[c.state].name}, score ${c.score}, hum ${c.f0} Hz.`
+    }));
+    $('#feed').innerHTML = mine.concat(EXAMPLE_FEED).slice(0, 8).map((e) => `
+      <div><time>${esc(e.t)}</time><span><span class="chip s-${e.state}" style="margin-right:6px">${esc(e.hive)}</span>${esc(e.msg)}</span></div>`).join('');
+  }
+
+  // theme changes repaint the canvas labels
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawSpectrogram); } catch {}
+  new MutationObserver(drawSpectrogram).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  fillSaveSelect();
+  renderSamples('swarm');
+  route();
+  loadSample('swarm');
+})();
+</script>
